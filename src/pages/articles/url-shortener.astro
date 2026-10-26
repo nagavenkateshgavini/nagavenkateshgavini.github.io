@@ -20,7 +20,7 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
     <div class="metric-grid"><div><small>New links</small><strong>≈ 39 writes/s</strong><span>100M ÷ 30 days</span></div><div><small>Redirects</small><strong>≈ 3,900 reads/s</strong><span>10B ÷ 30 days</span></div><div><small>Traffic ratio</small><strong>100:1</strong><span>Reads to writes</span></div></div>
     <p>These are monthly averages, not peak traffic. For an initial estimate, assume peaks can be several times higher, then ask whether traffic is globally distributed or concentrated around popular links.</p>
     <h2>3. Define the API</h2>
-    <pre><code>POST /api/links
+    <pre is:raw><code>POST /api/links
 &#123; "url": "https://example.com/some/long/path" &#125;
 
 201 Created
@@ -34,7 +34,7 @@ Location: https://example.com/some/long/path</code></pre>
     <div class="diagram"><div>Browser / Client</div><span>↓ HTTPS</span><div>Load balancer / API gateway</div><span>↓</span><div class="two"><div>Link creation service</div><div>Redirect service</div></div><span>↓ writes &nbsp; ↓ reads</span><div class="two"><div>Mapping database</div><div>Distributed cache</div></div></div>
     <p>The creation path validates the destination, generates a code, and stores the mapping. The redirect path checks the cache first, queries durable storage on a miss, and returns a redirect response.</p>
     <h2>5. Choose a data model</h2>
-    <pre><code>Link {
+    <pre is:raw><code>Link {
   code: string,        // unique key, e.g. "aZ81kLm"
   original_url: string,
   created_at: timestamp,
