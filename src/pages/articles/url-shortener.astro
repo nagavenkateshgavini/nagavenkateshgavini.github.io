@@ -1,0 +1,69 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+---
+<BaseLayout title="Design a URL Shortener" description="A practical system design interview walkthrough for a URL shortening service, with capacity estimates, architecture, trade-offs, follow-ups, and edge cases.">
+  <article class="article">
+    <a class="back" href="/#topics">← All topics</a>
+    <div class="eyebrow">System design guide · 01</div>
+    <h1>Design a URL shortener</h1>
+    <p class="lead">A classic interview prompt that tests API design, data modeling, key generation, caching, and your ability to reason about a read-heavy service.</p>
+    <div class="meta"><span class="tag">Foundational</span><span>12–18 min read</span><span>Updated October 2026</span></div>
+    <div class="callout"><strong>Interview goal</strong><p>Build a service that converts a long URL into a short link and redirects visitors quickly and reliably. Start simple, state your assumptions, and scale only where the numbers justify it.</p></div>
+    <h2>1. Clarify requirements</h2>
+    <h3>Functional requirements</h3>
+    <ul><li>Create a short URL for a submitted long URL.</li><li>Redirect a short code to its original URL.</li><li>Optionally support custom aliases, expiration, and basic analytics.</li></ul>
+    <h3>Non-functional requirements</h3>
+    <ul><li>Low-latency redirects and high availability.</li><li>Durable mappings: a created link should not silently disappear.</li><li>Unique short codes and reasonable abuse protection.</li><li>Scale reads independently from writes if traffic is read-heavy.</li></ul>
+    <p><strong>Interview tip:</strong> Ask whether links can expire, whether users need custom aliases, and whether analytics are in scope. Explicitly defer features that aren't required.</p>
+    <h2>2. Estimate capacity</h2>
+    <p>Use round numbers and say your assumptions aloud. Suppose the service creates 100 million links per month and receives 10 billion redirects per month.</p>
+    <div class="metric-grid"><div><small>New links</small><strong>≈ 39 writes/s</strong><span>100M ÷ 30 days</span></div><div><small>Redirects</small><strong>≈ 3,900 reads/s</strong><span>10B ÷ 30 days</span></div><div><small>Traffic ratio</small><strong>100:1</strong><span>Reads to writes</span></div></div>
+    <p>These are monthly averages, not peak traffic. For an initial estimate, assume peaks can be several times higher, then ask whether traffic is globally distributed or concentrated around popular links.</p>
+    <h2>3. Define the API</h2>
+    <pre><code>POST /api/links
+{ "url": "https://example.com/some/long/path" }
+
+201 Created
+{ "code": "aZ81kLm", "shortUrl": "https://sho.rt/aZ81kLm" }
+
+GET /{code}
+302 Found
+Location: https://example.com/some/long/path</code></pre>
+    <p>Validate URL syntax and allowed schemes. Avoid accepting dangerous schemes such as <code>javascript:</code>. Apply rate limits and abuse detection to link creation.</p>
+    <h2>4. High-level architecture</h2>
+    <div class="diagram"><div>Browser / Client</div><span>↓ HTTPS</span><div>Load balancer / API gateway</div><span>↓</span><div class="two"><div>Link creation service</div><div>Redirect service</div></div><span>↓ writes &nbsp; ↓ reads</span><div class="two"><div>Mapping database</div><div>Distributed cache</div></div></div>
+    <p>The creation path validates the destination, generates a code, and stores the mapping. The redirect path checks the cache first, queries durable storage on a miss, and returns a redirect response.</p>
+    <h2>5. Choose a data model</h2>
+    <pre><code>Link {
+  code: string,        // unique key, e.g. "aZ81kLm"
+  original_url: string,
+  created_at: timestamp,
+  expires_at: timestamp | null,
+  owner_id: string | null
+}</code></pre>
+    <p>Use <code>code</code> as the primary lookup key. The original URL may be long, so storage estimates should include indexes and metadata, not just the URL string.</p>
+    <h2>6. Generate unique short codes</h2>
+    <p>Two common approaches:</p>
+    <ul><li><strong>Random Base62 code:</strong> generate a code using letters and digits, then enforce a unique constraint and retry on collision.</li><li><strong>Encode a unique ID:</strong> allocate a unique numeric ID and encode it in Base62. This avoids random collisions but requires careful ID allocation and may reveal creation order.</li></ul>
+    <p>With 62 possible characters and a code length of 7, there are 62⁷ ≈ 3.5 trillion possible codes. That is a large space, but random collisions still become more likely as the number of issued codes grows. Enforce uniqueness in storage either way.</p>
+    <h2>7. Cache and database scaling</h2>
+    <ul><li>Cache popular <code>code → original_url</code> mappings with a bounded TTL.</li><li>Use a cache-miss strategy that prevents a stampede for a very popular uncached key.</li><li>Partition the mapping store by code hash when one database no longer meets throughput or storage needs.</li><li>Replicate data for availability, while being explicit about replication lag and consistency expectations.</li><li>Consider negative caching carefully for nonexistent codes; keep its TTL short so newly created links aren't hidden.</li></ul>
+    <h2>8. Edge cases and failure modes</h2>
+    <ul><li><strong>Code collision:</strong> database uniqueness constraint plus retry or a unique ID allocator.</li><li><strong>Cache outage:</strong> fall back to the database with protective limits; watch for a sudden database traffic surge.</li><li><strong>Hot link:</strong> cache aggressively and consider edge caching if redirect semantics allow it.</li><li><strong>Expired link:</strong> define whether it returns 404 or 410 and consistently enforce expiration.</li><li><strong>Malicious destination:</strong> validate input, rate-limit creation, and support abuse reporting and blocklists.</li><li><strong>Redirect caching:</strong> 301 may be cached aggressively by clients; 302 offers more flexibility when destinations or analytics policies can change.</li><li><strong>Analytics overload:</strong> emit click events asynchronously rather than blocking the redirect on analytics writes.</li><li><strong>Concurrent custom aliases:</strong> atomically reserve the alias with a unique constraint.</li></ul>
+    <h2>9. Interviewer follow-up questions</h2>
+    <details><summary>What happens if two requests generate the same code?</summary><p>Make the database enforce uniqueness. On conflict, generate another code and retry with a bounded retry policy. Do not rely on an application-side existence check alone because concurrent requests can race.</p></details>
+    <details><summary>How would you support billions of links?</summary><p>Estimate total mapping storage and index overhead, partition by a stable hash of the code, replicate for availability, and measure hot-key distribution. Choose a database based on access patterns and consistency requirements rather than assuming one specific database is always best.</p></details>
+    <details><summary>How do you prevent a cache stampede?</summary><p>Use request coalescing or a single-flight mechanism per key, short-lived locks where appropriate, TTL jitter, and controlled database concurrency. The correct approach depends on cache and service topology.</p></details>
+    <details><summary>Should the redirect be 301 or 302?</summary><p>Use 301 when permanent caching is acceptable. Use 302 when you want more control over redirect behavior or destination changes. Consider client caching and analytics requirements before deciding.</p></details>
+    <details><summary>What if the database is unavailable?</summary><p>Cache hits can continue serving popular links, but cache misses may fail. Set timeouts, circuit breakers, and load shedding; avoid unlimited retries. Define whether the service returns a controlled error or a fallback response.</p></details>
+    <details><summary>How would you prevent abuse?</summary><p>Rate-limit link creation, validate URLs, detect phishing and malware, provide abuse reporting, and apply reputation checks. Keep redirect latency low without treating every redirect as a synchronous expensive scan.</p></details>
+    <details><summary>How would you make analytics scalable?</summary><p>Emit click events asynchronously to a durable queue or event stream, aggregate them separately, and accept that dashboards may be eventually consistent. Do not make a redirect wait for analytics persistence.</p></details>
+    <h2>10. A strong interview wrap-up</h2>
+    <p>Summarize the read-heavy architecture, explain how unique codes are guaranteed, identify the cache and database bottlenecks, and state which assumptions would change your design. A strong answer is not the most complicated one—it is the one whose trade-offs you can defend.</p>
+    <div class="callout"><strong>Practice out loud</strong><p>Try delivering the design in 35 minutes: requirements (5), estimates (5), API/data model (5), architecture (10), deep dives and failures (10). Adjust based on the interviewer’s signals.</p></div>
+    <a class="button" href="/#topics">← Back to all design questions</a>
+  </article>
+</BaseLayout>
+<style>
+.article{max-width:800px;margin:0 auto;padding:54px 0 0}.back{display:inline-block;color:var(--mint);font-size:.88rem;margin-bottom:36px}.article h1{font-size:clamp(2.6rem,7vw,4.5rem);line-height:1.02;letter-spacing:-.07em;margin:18px 0}.lead{font-size:1.15rem;line-height:1.8;color:#bdc8da}.meta{display:flex;gap:14px;align-items:center;flex-wrap:wrap;color:var(--muted);font-size:.8rem;margin:22px 0 32px}.article h2{font-size:1.65rem;letter-spacing:-.04em;margin:44px 0 14px}.article h3{font-size:1.1rem;margin:25px 0 8px}.article p,.article li{color:#c0cbdd;line-height:1.85}.article li{margin:7px 0}.article ul{padding-left:22px}.article strong{color:#f3f6fc}.article code{font-size:.88em;color:var(--mint);background:#ffffff0b;border-radius:5px;padding:2px 5px}.article pre{overflow-x:auto;background:#070c17;border:1px solid #ffffff18;border-radius:13px;padding:18px;line-height:1.7}.article pre code{background:none;padding:0;color:#d6e4ff}.callout{background:#122a2b;border:1px solid #8ff0cf44;border-radius:14px;padding:18px 20px;margin:28px 0}.callout p{margin-bottom:0}.metric-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:22px 0}.metric-grid div{display:flex;flex-direction:column;gap:7px;padding:16px;background:#ffffff08;border:1px solid #ffffff12;border-radius:12px}.metric-grid small,.metric-grid span{font-size:.75rem;color:var(--muted)}.metric-grid strong{font-size:1.12rem;color:var(--mint)}.diagram{padding:22px;border:1px solid #ffffff18;border-radius:14px;background:#ffffff04;display:grid;gap:8px;text-align:center;color:var(--mint)}.diagram>div:not(.two){border:1px solid #57708f88;background:#17263b;border-radius:9px;padding:13px;color:#e8edf8}.diagram>span{font-size:.78rem}.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.two div{padding:14px 7px;border:1px solid #8ff0cf44;background:#122a2b;border-radius:9px;color:#e8edf8;font-size:.9rem}details{border:1px solid #ffffff1c;border-radius:12px;padding:15px 17px;margin:10px 0;background:#ffffff04}summary{cursor:pointer;font-weight:700;line-height:1.5}details p{margin-bottom:0}.article>.button{margin-top:25px}@media(max-width:580px){.article{padding-top:35px}.metric-grid{grid-template-columns:1fr}.metric-grid div{display:grid;grid-template-columns:1fr 1fr}.metric-grid span{grid-column:1/-1}}
+</style>
