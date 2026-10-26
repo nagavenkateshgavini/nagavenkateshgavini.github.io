@@ -21,10 +21,10 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
     <p>These are monthly averages, not peak traffic. For an initial estimate, assume peaks can be several times higher, then ask whether traffic is globally distributed or concentrated around popular links.</p>
     <h2>3. Define the API</h2>
     <pre><code>POST /api/links
-{ "url": "https://example.com/some/long/path" }
+&#123; "url": "https://example.com/some/long/path" &#125;
 
 201 Created
-{ "code": "aZ81kLm", "shortUrl": "https://sho.rt/aZ81kLm" }
+&#123; "code": "aZ81kLm", "shortUrl": "https://sho.rt/aZ81kLm" &#125;
 
 GET /{code}
 302 Found
